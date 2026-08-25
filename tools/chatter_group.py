@@ -1745,6 +1745,7 @@ def process_group_player_msg_event(
                     get_zone_name(zone_id),
                 ),
                 player_message,
+                history=chat_hist,
             )
             try:
                 conv_ok = (
@@ -1869,6 +1870,7 @@ def process_group_player_msg_event(
                     get_zone_name(zone_id),
                 ),
                 player_message,
+                history=chat_hist,
             )
         if lookup_block:
             prompt = prompt + lookup_block

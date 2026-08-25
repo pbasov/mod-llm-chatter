@@ -591,7 +591,8 @@ def make_execute(config, executor, ctx):
     return _execute
 
 
-def ground(client, config, ctx, player_message):
+def ground(client, config, ctx, player_message,
+           history=''):
     """Stage A: look things up before the bot speaks.
 
     Returns a <lookup_results> block to append to the normal
@@ -610,9 +611,22 @@ def ground(client, config, ctx, player_message):
             return ''
 
         who = ctx.get('bot_name') or 'a companion'
+        # The conversation so far. Without it a follow-up cannot be
+        # resolved: "who's the final boss?" two lines after asking
+        # about the Deadmines has no subject on its own, so nothing
+        # gets looked up and the bot truthfully says it does not
+        # know. The speaking prompt has always had this; the
+        # grounding prompt was being built from the bare message.
+        history_block = ''
+        if history:
+            history_block = (
+                "Recent party chat, for resolving what is being "
+                "referred to:\n%s\n\n" % str(history)[:1200]
+            )
         prompt = (
             "You are %s, a level %s %s %s in World of "
             "Warcraft (3.3.5a), currently in %s.\n"
+            "%s"
             "%s just said to you: \"%s\"\n\n"
             "If answering needs a fact you cannot know from "
             "this conversation -- a quest log, an item, an "
@@ -622,6 +636,10 @@ def ground(client, config, ctx, player_message):
             "for this server; your own recollection of World "
             "of Warcraft may be wrong or from a different "
             "expansion -- bosses and instances especially are "
+            "easy to confuse. If the question refers back to "
+            "something earlier in the chat above (\"the final "
+            "boss\", \"how far is it\", \"what level\"), resolve "
+            "what it means from that chat and look THAT up. "
             "easy to confuse, so look them up rather than "
             "trusting yourself. Prefer calling several tools at "
             "once over guessing. If no lookup is needed, reply "
@@ -631,6 +649,7 @@ def ground(client, config, ctx, player_message):
                 ctx.get('bot_race') or '',
                 ctx.get('bot_class') or 'adventurer',
                 ctx.get('zone_name') or 'Azeroth',
+                history_block,
                 ctx.get('player_name') or 'The player',
                 str(player_message)[:400],
             )
@@ -668,14 +687,15 @@ def ground(client, config, ctx, player_message):
 
 
 def ground_prompt(prompt, client, config, ctx,
-                  player_message):
+                  player_message, history=''):
     """Append lookup results to an already-built prompt.
 
     PromptParts.__add__ keeps the system block intact and
     appends to the user half, so the JSON contract the
     parser depends on is unchanged.
     """
-    block = ground(client, config, ctx, player_message)
+    block = ground(client, config, ctx, player_message,
+                   history=history)
     return (prompt + block) if block else prompt
 
 
