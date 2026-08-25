@@ -2159,6 +2159,56 @@ LLMChatter.Tools.BudgetSeconds = 45
 #
 LLMChatter.Tools.MaxTokens = 300
 
+####################################################################################################
+# HINDSIGHT (long-term memory backend)
+####################################################################################################
+#
+#   LLMChatter.Hindsight.Enable
+#       Mirror committed memories into a Hindsight bank and
+#       recall them by relevance instead of at random. The
+#       llm_bot_memories table keeps working either way; this
+#       augments it rather than replacing it.
+#       Default: 0 (disabled)
+#
+LLMChatter.Hindsight.Enable = 0
+
+#
+#   LLMChatter.Hindsight.BaseUrl
+#       Hindsight HTTP API root.
+#
+LLMChatter.Hindsight.BaseUrl = http://hindsight-api-global.hindsight.svc.cluster.local:8888
+
+#
+#   LLMChatter.Hindsight.Bank
+#       One bank for the whole realm. Per-bot banks would
+#       fragment the entity graph into isolated copies of the
+#       same world; bots are separated by tag instead, and
+#       recall is scoped so a bot only ever reaches its own
+#       experience with a given player.
+#       Default: azerothcore
+#
+LLMChatter.Hindsight.Bank = azerothcore
+
+#
+#   LLMChatter.Hindsight.RecallTimeout
+#       Seconds to wait on a recall. Recall costs a flat ~5s
+#       and does not tune down, which is why it is prefetched
+#       in the background rather than run inline.
+#       Default: 8
+#
+LLMChatter.Hindsight.RecallTimeout = 8
+
+#
+#   LLMChatter.Hindsight.MaxRetainPerMinute
+#       Ceiling on memories mirrored per minute. Hindsight
+#       extracts facts with an LLM call of its own; if it is
+#       pointed at the same backend as the bridge, an
+#       unbounded retain rate means companions compete with
+#       themselves for slots.
+#       Default: 20
+#
+LLMChatter.Hindsight.MaxRetainPerMinute = 20
+
 #
 #   LLMChatter.Bridge.InterSystemStaggerMin
 #   LLMChatter.Bridge.InterSystemStaggerMax

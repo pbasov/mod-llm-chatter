@@ -546,6 +546,27 @@ def process_group_event(db, client, config, event):
                     db, bot_guid, player_guid,
                     count=3,
                 )
+                # Warm a semantic recall in the background.
+                # It costs ~5s, which disappears into the
+                # join sequence's existing delays, and is
+                # ready by the time the player says anything.
+                try:
+                    from chatter_hindsight import prefetch
+                    prefetch(
+                        config,
+                        {
+                            'bot_guid': bot_guid,
+                            'bot_name': bot_name,
+                            'player_guid': player_guid,
+                            'player_name': player_name,
+                        },
+                        'adventuring with %s' % player_name,
+                    )
+                except Exception:
+                    logger.debug(
+                        "memory prefetch failed",
+                        exc_info=True,
+                    )
                 player_name_known = bool(memories)
                 recall_chance = int(config.get(
                     'LLMChatter.Memory.RecallChance',
@@ -1777,11 +1798,26 @@ def process_group_player_msg_event(
                 and random.random()
                     < recall_chance
             ):
-                msg_memories = get_bot_memories(
-                    db, bot_guid,
-                    player_guid, count=3,
-                    exclude_first_meeting=True,
-                )
+                msg_memories = None
+                try:
+                    from chatter_hindsight import (
+                        take_prefetched,
+                    )
+                    msg_memories = take_prefetched({
+                        'bot_guid': bot_guid,
+                        'player_guid': player_guid,
+                    }) or None
+                except Exception:
+                    logger.debug(
+                        "prefetched recall unavailable",
+                        exc_info=True,
+                    )
+                if not msg_memories:
+                    msg_memories = get_bot_memories(
+                        db, bot_guid,
+                        player_guid, count=3,
+                        exclude_first_meeting=True,
+                    )
                 if not msg_memories:
                     msg_memories = None
 

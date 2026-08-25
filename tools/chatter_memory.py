@@ -883,6 +883,22 @@ def flush_session_memories(
                     rows_activated, bot_guid,
                     player_guid,
                 )
+                # Mirror into Hindsight so they can be
+                # recalled by relevance later instead of at
+                # random. No-op unless Hindsight is enabled.
+                try:
+                    from chatter_hindsight import (
+                        retain_activated,
+                    )
+                    retain_activated(
+                        db, config, group_id, bot_guid,
+                        player_guid, session_start,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Hindsight mirror failed",
+                        exc_info=True,
+                    )
 
             # Prune to cap
             cnt = _count_active_memories(
