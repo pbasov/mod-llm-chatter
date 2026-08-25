@@ -1878,6 +1878,12 @@ def process_group_player_msg_event(
         max_tokens = pick_random_max_tokens(config)
         if msg_memories:
             max_tokens = max(max_tokens, 250)
+        if lookup_block:
+            # A grounded answer has to fit actual facts -- names,
+            # levels, places. The randomised 150-300 budget is
+            # sized for a one-line quip and squeezes them back
+            # out again.
+            max_tokens = max(max_tokens, 350)
         _pmsg_label = (
             'group_player_msg_memory'
             if msg_memories

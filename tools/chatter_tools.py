@@ -669,16 +669,21 @@ def ground(client, config, ctx, player_message,
             return ''
         return (
             "\n<lookup_results>\n"
-            "Facts looked up from the game world just now. "
-            "These are authoritative -- prefer them over "
-            "anything you think you remember, and weave them "
-            "into your reply naturally rather than reciting "
-            "them.\n%s\n"
-            "If these results do not actually answer what was "
-            "asked, say plainly that you do not know rather "
-            "than filling the gap from memory. Being wrong "
-            "about Azeroth is worse than admitting ignorance."
-            "\n</lookup_results>\n"
+            "You looked these facts up from the game world just "
+            "now. They are correct; your own recollection of "
+            "World of Warcraft is not.\n%s\n"
+            "ANSWER THE QUESTION WITH THESE FACTS. Be specific "
+            "-- names, places, levels, numbers -- exactly as "
+            "given. This overrides any length limit, creative "
+            "twist or style note earlier in this prompt: those "
+            "govern HOW you speak, never WHETHER you answer. "
+            "Two sentences is fine if that is what it takes. A "
+            "companion who knows the answer and gives a vague "
+            "one instead is worse than useless.\n"
+            "If these results genuinely do not cover what was "
+            "asked, say so plainly -- but do not invent, and do "
+            "not deflect with atmosphere.\n"
+            "</lookup_results>\n"
             % '\n'.join('  - ' + r for r in results)
         )
     except Exception:

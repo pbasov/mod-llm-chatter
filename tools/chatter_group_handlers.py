@@ -2575,6 +2575,11 @@ def execute_player_msg_conversation(
     conv_tokens = min(
         max_tokens * (1 + num_bots), 1000
     )
+    if lookup_context:
+        # Same reason as the single-reply path: a grounded answer
+        # has to fit real names, levels and places, and the stock
+        # budget is sized for a one-line quip.
+        conv_tokens = min(max(conv_tokens, 500), 1000)
 
     _dflav_conv = get_dungeon_flavor(map_id)
     pmsg_meta = build_zone_metadata(
