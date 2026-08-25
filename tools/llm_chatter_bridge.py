@@ -16,6 +16,9 @@ This script:
    dynamic timing delays
 """
 
+from chatter_llm import (
+    make_openai_client, make_anthropic_client,
+)
 import argparse
 import json
 import logging
@@ -1292,7 +1295,7 @@ def main():
         ollama_api_url = (
             f"{base_url.rstrip('/')}/v1"
         )
-        client = openai.OpenAI(
+        client = make_openai_client(config, 
             base_url=ollama_api_url,
             api_key="ollama"
         )
@@ -1302,14 +1305,14 @@ def main():
         )
         if not api_key:
             sys.exit(1)
-        client = openai.OpenAI(api_key=api_key)
+        client = make_openai_client(config, api_key=api_key)
     elif provider == 'google':
         api_key = config.get(
             'LLMChatter.Google.ApiKey', ''
         )
         if not api_key:
             sys.exit(1)
-        client = openai.OpenAI(
+        client = make_openai_client(config, 
             api_key=api_key,
             base_url=config.get(
                 'LLMChatter.Google.BaseUrl',
@@ -1342,7 +1345,7 @@ def main():
         }
         if headers:
             kwargs['default_headers'] = headers
-        client = openai.OpenAI(**kwargs)
+        client = make_openai_client(config, **kwargs)
     else:
         # Anthropic (default)
         api_key = config.get(
@@ -1350,7 +1353,7 @@ def main():
         )
         if not api_key:
             sys.exit(1)
-        client = anthropic.Anthropic(api_key=api_key)
+        client = make_anthropic_client(config, api_key=api_key)
 
     # Get poll interval
     poll_interval = int(config.get(

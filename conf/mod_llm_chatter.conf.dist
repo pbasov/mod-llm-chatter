@@ -2066,6 +2066,38 @@ LLMChatter.GroupChatter.ReactDelay.Join = 1
 LLMChatter.Bridge.MaxConcurrent = 5
 
 #
+#   LLMChatter.Bridge.GlobalMaxConcurrent
+#       Hard cap on LLM calls in flight across the whole
+#       bridge. MaxConcurrent above only gates event workers;
+#       idle chatter, bot questions, pre-cache, tone/backstory
+#       regeneration and the memory executor all add calls on
+#       top of it. Without this cap the bridge can offer more
+#       concurrency than the backend has slots for, and the
+#       queue collapses into multi-minute latency.
+#       Default: 6
+#
+LLMChatter.Bridge.GlobalMaxConcurrent = 6
+
+#
+#   LLMChatter.Bridge.RequestTimeout
+#       Per-request timeout in seconds passed to the provider
+#       SDK. Both SDKs default to 600s, which lets one stalled
+#       call hold a worker for ten minutes.
+#       Default: 60
+#
+LLMChatter.Bridge.RequestTimeout = 60
+
+#
+#   LLMChatter.Bridge.MaxRetries
+#       Retries performed inside the provider SDK. The SDK
+#       default is 2, which triples offered load exactly when
+#       the backend is already slow. Leave at 0 unless you are
+#       calling a flaky remote provider.
+#       Default: 0
+#
+LLMChatter.Bridge.MaxRetries = 0
+
+#
 #   LLMChatter.Bridge.InterSystemStaggerMin
 #   LLMChatter.Bridge.InterSystemStaggerMax
 #       Random delay range (seconds) added when two

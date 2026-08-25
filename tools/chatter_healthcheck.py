@@ -33,6 +33,9 @@ anthropic, openai), imported lazily so a missing optional
 provider SDK never breaks the rest of the report.
 """
 
+from chatter_llm import (
+    make_openai_client, make_anthropic_client,
+)
 import argparse
 import json
 import os
@@ -481,7 +484,7 @@ def _is_model_error(exc):
 def _probe_anthropic(config, model):
     """Make a minimal Anthropic call; returns text or raises."""
     import anthropic
-    client = anthropic.Anthropic(
+    client = make_anthropic_client(config, 
         api_key=config.get('LLMChatter.Anthropic.ApiKey', ''),
     )
     resp = client.messages.create(
@@ -519,16 +522,16 @@ def _build_openai_compatible_client(config, provider):
             'LLMChatter.Ollama.BaseUrl',
             'http://host.docker.internal:11434',
         )
-        return openai.OpenAI(
+        return make_openai_client(config, 
             base_url=f"{base_url.rstrip('/')}/v1",
             api_key='ollama',
         )
     if provider == 'openai':
-        return openai.OpenAI(
+        return make_openai_client(config, 
             api_key=config.get('LLMChatter.OpenAI.ApiKey', ''),
         )
     if provider == 'google':
-        return openai.OpenAI(
+        return make_openai_client(config, 
             api_key=config.get('LLMChatter.Google.ApiKey', ''),
             base_url=config.get(
                 'LLMChatter.Google.BaseUrl', GOOGLE_OPENAI_BASE_URL
@@ -541,7 +544,7 @@ def _build_openai_compatible_client(config, provider):
             'LLMChatter.OpenRouter.BaseUrl', OPENROUTER_BASE_URL
         ),
     }
-    return openai.OpenAI(**kwargs)
+    return make_openai_client(config, **kwargs)
 
 
 def _check_llm_probe(config):

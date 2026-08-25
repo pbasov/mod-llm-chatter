@@ -17,6 +17,107 @@ from chatter_constants import (
 logger = logging.getLogger(__name__)
 
 
+# ============================================================
+# TRANSPORT HARDENING + GLOBAL CONCURRENCY
+# ============================================================
+
+_llm_semaphore = None
+_llm_semaphore_size = 0
+_llm_semaphore_lock = threading.Lock()
+
+
+def _client_transport_kwargs(config):
+    """timeout / max_retries for the provider SDKs.
+
+    Both SDKs default to a 600s timeout and 2 silent
+    retries. Under load those retries multiply the
+    offered concurrency, which turns a merely slow
+    backend into a stalled one, so retries default to
+    off and the timeout is bounded.
+    """
+    try:
+        timeout = float(config.get(
+            'LLMChatter.Bridge.RequestTimeout', 60
+        ))
+    except (ValueError, TypeError):
+        timeout = 60.0
+    try:
+        retries = max(0, int(config.get(
+            'LLMChatter.Bridge.MaxRetries', 0
+        )))
+    except (ValueError, TypeError):
+        retries = 0
+    return {'timeout': timeout, 'max_retries': retries}
+
+
+def make_openai_client(config, **kwargs):
+    """openai.OpenAI with transport limits applied."""
+    import openai as _openai_sdk
+    kwargs.update(_client_transport_kwargs(config))
+    return _openai_sdk.OpenAI(**kwargs)
+
+
+def make_anthropic_client(config, **kwargs):
+    """anthropic.Anthropic with transport limits."""
+    import anthropic as _anthropic_sdk
+    kwargs.update(_client_transport_kwargs(config))
+    return _anthropic_sdk.Anthropic(**kwargs)
+
+
+def _get_llm_semaphore(config):
+    """Process-wide cap on concurrent LLM calls.
+
+    Bridge.MaxConcurrent only gates event futures. The
+    named background workers (idle chatter, bot
+    questions, pre-cache, tone regeneration, legacy
+    requests) and chatter_memory's own executor each
+    add in-flight calls on top of it, so the bridge can
+    offer far more concurrency than the backend has
+    slots for. This is the cap that actually covers
+    every caller.
+    """
+    global _llm_semaphore, _llm_semaphore_size
+    try:
+        size = max(1, int(config.get(
+            'LLMChatter.Bridge.GlobalMaxConcurrent', 6
+        )))
+    except (ValueError, TypeError):
+        size = 6
+    with _llm_semaphore_lock:
+        if (_llm_semaphore is None
+                or _llm_semaphore_size != size):
+            _llm_semaphore = threading.BoundedSemaphore(
+                size
+            )
+            _llm_semaphore_size = size
+        return _llm_semaphore
+
+
+def _extract_anthropic_text(response, label=''):
+    """Join text blocks from an Anthropic response.
+
+    content[0] is not guaranteed to be a text block --
+    with tools enabled a ToolUseBlock can come first,
+    and indexing it raises. Iterate instead.
+    """
+    parts = []
+    for block in (getattr(response, 'content', None) or []):
+        if getattr(block, 'type', None) == 'text':
+            parts.append(block.text)
+        elif hasattr(block, 'text'):
+            parts.append(block.text)
+    text = ''.join(parts).strip()
+    if not text:
+        logger.warning(
+            "LLM returned no text content (%s): "
+            "stop_reason=%s",
+            label, getattr(response, 'stop_reason', None),
+        )
+        return None
+    return text
+
+
+
 def _split_prompt(prompt):
     """Extract system/user parts from a prompt.
 
@@ -218,7 +319,7 @@ def get_llm_client(config):
                 'LLMChatter.Ollama.BaseUrl',
                 'http://localhost:11434',
             )
-            _main_client = openai.OpenAI(
+            _main_client = make_openai_client(config, 
                 base_url=(
                     f"{base_url.rstrip('/')}/v1"
                 ),
@@ -226,14 +327,14 @@ def get_llm_client(config):
             )
         elif provider == 'openai':
             import openai
-            _main_client = openai.OpenAI(
+            _main_client = make_openai_client(config, 
                 api_key=config.get(
                     'LLMChatter.OpenAI.ApiKey', ''
                 ),
             )
         elif provider == 'google':
             import openai
-            _main_client = openai.OpenAI(
+            _main_client = make_openai_client(config, 
                 api_key=config.get(
                     'LLMChatter.Google.ApiKey', ''
                 ),
@@ -256,10 +357,10 @@ def get_llm_client(config):
             headers = _openrouter_headers(config)
             if headers:
                 kwargs['default_headers'] = headers
-            _main_client = openai.OpenAI(**kwargs)
+            _main_client = make_openai_client(config, **kwargs)
         else:
             import anthropic
-            _main_client = anthropic.Anthropic(
+            _main_client = make_anthropic_client(config, 
                 api_key=config.get(
                     'LLMChatter.Anthropic.ApiKey',
                     '',
@@ -313,8 +414,10 @@ def call_llm(
 
     t0 = time.monotonic()
     result = None
+    _sem = _get_llm_semaphore(config)
     sys_msg, user_msg = _split_prompt(prompt)
     sent_user_msg = user_msg  # tracks actual payload
+    _sem.acquire()
     try:
         if provider == 'ollama':
             sent_user_msg = _ollama_user_msg(
@@ -375,13 +478,14 @@ def call_llm(
             response = client.messages.create(
                 **kwargs
             )
-            result = response.content[0].text.strip()
+            result = _extract_anthropic_text(response, label)
     except Exception as exc:
         logger.error(
             "LLM call failed (%s): %s", label, exc
         )
         result = None
     finally:
+        _sem.release()
         duration_ms = int(
             (time.monotonic() - t0) * 1000
         )
@@ -450,7 +554,7 @@ def _get_quick_analyze_client(config):
             ollama_api_url = (
                 f"{base_url.rstrip('/')}/v1"
             )
-            _quick_analyze_client = openai.OpenAI(
+            _quick_analyze_client = make_openai_client(config, 
                 base_url=ollama_api_url,
                 api_key="ollama"
             )
@@ -461,7 +565,7 @@ def _get_quick_analyze_client(config):
             )
             if not api_key:
                 return None, main_provider
-            _quick_analyze_client = openai.OpenAI(
+            _quick_analyze_client = make_openai_client(config, 
                 api_key=api_key
             )
         elif qa_provider == 'google':
@@ -471,7 +575,7 @@ def _get_quick_analyze_client(config):
             )
             if not api_key:
                 return None, main_provider
-            _quick_analyze_client = openai.OpenAI(
+            _quick_analyze_client = make_openai_client(config, 
                 api_key=api_key,
                 base_url=config.get(
                     'LLMChatter.Google.BaseUrl',
@@ -495,7 +599,7 @@ def _get_quick_analyze_client(config):
             headers = _openrouter_headers(config)
             if headers:
                 kwargs['default_headers'] = headers
-            _quick_analyze_client = openai.OpenAI(**kwargs)
+            _quick_analyze_client = make_openai_client(config, **kwargs)
         elif qa_provider == 'anthropic':
             import anthropic
             api_key = config.get(
@@ -503,7 +607,7 @@ def _get_quick_analyze_client(config):
             )
             if not api_key:
                 return None, main_provider
-            _quick_analyze_client = anthropic.Anthropic(
+            _quick_analyze_client = make_anthropic_client(config, 
                 api_key=api_key
             )
         else:
@@ -585,8 +689,10 @@ def quick_llm_analyze(
 
     t0 = time.monotonic()
     result = None
+    _sem = _get_llm_semaphore(config)
     sys_msg, user_msg = _split_prompt(prompt)
     sent_user_msg = user_msg
+    _sem.acquire()
     try:
         if provider == 'ollama':
             sent_user_msg = _ollama_user_msg(
@@ -656,13 +762,14 @@ def quick_llm_analyze(
                     **kwargs
                 )
             )
-            result = response.content[0].text.strip()
+            result = _extract_anthropic_text(response, label)
     except Exception as exc:
         logger.error(
             "LLM call failed (%s): %s", label, exc
         )
         result = None
     finally:
+        _sem.release()
         duration_ms = int(
             (time.monotonic() - t0) * 1000
         )

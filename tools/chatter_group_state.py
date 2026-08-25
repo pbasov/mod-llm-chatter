@@ -6,6 +6,9 @@ This module owns:
 - pre-generated farewell storage
 """
 
+from chatter_llm import (
+    make_openai_client, make_anthropic_client,
+)
 import logging
 import random
 import threading
@@ -383,20 +386,20 @@ def _generate_bot_tone(
                 'LLMChatter.Ollama.BaseUrl',
                 'http://localhost:11434',
             )
-            client = _openai.OpenAI(
+            client = make_openai_client(config, 
                 base_url=f"{base.rstrip('/')}/v1",
                 api_key='ollama',
             )
         elif provider == 'openai':
             import openai as _openai
-            client = _openai.OpenAI(
+            client = make_openai_client(config, 
                 api_key=config.get(
                     'LLMChatter.OpenAI.ApiKey', ''
                 )
             )
         elif provider == 'google':
             import openai as _openai
-            client = _openai.OpenAI(
+            client = make_openai_client(config, 
                 api_key=config.get(
                     'LLMChatter.Google.ApiKey', ''
                 ),
@@ -429,10 +432,10 @@ def _generate_bot_tone(
             }
             if headers:
                 kwargs['default_headers'] = headers
-            client = _openai.OpenAI(**kwargs)
+            client = make_openai_client(config, **kwargs)
         else:
             import anthropic as _anthropic
-            client = _anthropic.Anthropic(
+            client = make_anthropic_client(config, 
                 api_key=config.get(
                     'LLMChatter.Anthropic.ApiKey', ''
                 )
@@ -612,20 +615,20 @@ def _generate_bot_backstory(
                 'LLMChatter.Ollama.BaseUrl',
                 'http://localhost:11434',
             )
-            client = _openai.OpenAI(
+            client = make_openai_client(config, 
                 base_url=f"{base.rstrip('/')}/v1",
                 api_key='ollama',
             )
         elif provider == 'openai':
             import openai as _openai
-            client = _openai.OpenAI(
+            client = make_openai_client(config, 
                 api_key=config.get(
                     'LLMChatter.OpenAI.ApiKey', ''
                 )
             )
         elif provider == 'google':
             import openai as _openai
-            client = _openai.OpenAI(
+            client = make_openai_client(config, 
                 api_key=config.get(
                     'LLMChatter.Google.ApiKey', ''
                 ),
@@ -658,10 +661,10 @@ def _generate_bot_backstory(
             }
             if headers:
                 kwargs['default_headers'] = headers
-            client = _openai.OpenAI(**kwargs)
+            client = make_openai_client(config, **kwargs)
         else:
             import anthropic as _anthropic
-            client = _anthropic.Anthropic(
+            client = make_anthropic_client(config, 
                 api_key=config.get(
                     'LLMChatter.Anthropic.ApiKey', ''
                 )
