@@ -1,5 +1,6 @@
 """Proximity chatter event handlers."""
 
+from chatter_tools import ground_prompt
 import logging
 import random
 from typing import Dict, List, Optional
@@ -887,6 +888,20 @@ def handle_proximity_player_say(
     speaker = participants[0]
     prompt = _player_say_single_prompt(
         db, extra, speaker, player_message, history
+    )
+    prompt = ground_prompt(
+        prompt, client, config,
+        {
+            'bot_guid': speaker.get('bot_guid'),
+            'bot_name': speaker.get('name'),
+            'bot_level': speaker.get('level'),
+            'bot_class': speaker.get('class'),
+            'bot_race': speaker.get('race'),
+            'zone_name': extra.get('zone_name'),
+            'player_name': extra.get('player_name'),
+            'player_guid': extra.get('player_guid'),
+        },
+        player_message,
     )
     response = call_llm(
         client,

@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 from chatter_db import insert_chat_message
 from chatter_general import _pick_length_hint
+from chatter_tools import ground_prompt
 from chatter_guild import (
     _apply_participant_references,
     _clean_guild_conversation,
@@ -665,6 +666,20 @@ def _generate_single_reply(
         callback_requested,
         name_requested,
         question_requested,
+    )
+
+    speaker = participant.get('speaker') or {}
+    prompt = ground_prompt(
+        prompt, client, config,
+        {
+            'bot_guid': participant.get('guid'),
+            'bot_name': participant.get('name'),
+            'bot_level': speaker.get('level'),
+            'bot_class': speaker.get('class'),
+            'bot_race': speaker.get('race'),
+            'player_name': player_name,
+        },
+        player_message,
     )
     response = call_llm(
         client,

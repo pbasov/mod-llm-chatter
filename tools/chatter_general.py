@@ -9,6 +9,7 @@ Zone-scoped: history per zone, cooldowns per zone,
 bot selection by zone.
 """
 
+from chatter_tools import ground_prompt
 import logging
 import random
 import time
@@ -785,6 +786,20 @@ def process_general_player_msg_event(
             zone_flavor=zone_flavor,
             subzone_name=subzone_name,
             subzone_lore=subzone_lore,
+        )
+
+        prompt1 = ground_prompt(
+            prompt1, client, config,
+            {
+                'bot_guid': bot1_guid,
+                'bot_name': bot1_name,
+                'bot_level': bot1_level,
+                'bot_class': bot1_class,
+                'bot_race': bot1_race,
+                'zone_name': zone_name,
+                'player_name': player_name,
+            },
+            player_message,
         )
 
         max_tokens = int(config.get(

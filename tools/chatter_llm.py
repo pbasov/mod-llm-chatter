@@ -786,3 +786,179 @@ def quick_llm_analyze(
         except Exception:
             pass
     return result
+
+
+# ============================================================
+# TOOL CALLING (grounding round)
+# ============================================================
+
+_TOOL_PROVIDERS = ('ollama', 'openai', 'google', 'openrouter')
+
+
+def _tool_call_args(call):
+    """Parse a tool call's arguments into a dict."""
+    import json
+    raw = getattr(
+        getattr(call, 'function', None), 'arguments', ''
+    )
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except (ValueError, TypeError):
+        logger.warning(
+            "Tool call arguments were not JSON: %.200s", raw
+        )
+        return {}
+
+
+def call_llm_with_tools(
+    client: Any,
+    prompt: str,
+    config: dict,
+    *,
+    tools: list,
+    execute,
+    label: str = 'tools',
+    max_rounds: int = 2,
+    budget_seconds: float = 45.0,
+    max_tokens_override: int = None,
+) -> list:
+    """Run a grounding round so the model can look things up.
+
+    This is deliberately NOT the message-producing call. The
+    module's speaking prompts carry a system block demanding
+    bare JSON, and parse_single_response's message regex is
+    non-nested, so tool-call JSON in the same completion would
+    not survive parsing. Instead this returns raw lookup
+    results for the caller to inject as context into the
+    normal prompt, which stays byte-identical otherwise.
+
+    Returns a list of "tool_name: result" strings, empty when
+    the model asked for nothing or anything went wrong. Never
+    raises -- an un-grounded reply is always better than none.
+    """
+    if not tools or execute is None:
+        return []
+
+    provider = config.get(
+        'LLMChatter.Provider', 'anthropic'
+    ).lower()
+    if provider not in _TOOL_PROVIDERS:
+        logger.warning(
+            "Tool calling is not implemented for provider "
+            "'%s'; answering without lookups", provider
+        )
+        return []
+
+    model = resolve_model(config.get('LLMChatter.Model', ''))
+    if max_tokens_override is not None:
+        max_tokens = max_tokens_override
+    else:
+        max_tokens = int(config.get(
+            'LLMChatter.Tools.MaxTokens', 300
+        ))
+    max_tokens = _effective_max_tokens(
+        provider, config, max_tokens
+    )
+
+    sys_msg, user_msg = _split_prompt(prompt)
+    messages = _build_chat_messages(sys_msg, user_msg)
+
+    sem = _get_llm_semaphore(config)
+    deadline = time.monotonic() + max(1.0, budget_seconds)
+    collected = []
+
+    for round_no in range(max(1, max_rounds)):
+        if time.monotonic() >= deadline:
+            logger.warning(
+                "Tool budget exhausted before round %d (%s)",
+                round_no + 1, label,
+            )
+            break
+
+        kwargs = {
+            'model': model,
+            'max_tokens': max_tokens,
+            'temperature': 0.2,
+            'messages': messages,
+            'tools': tools,
+            'tool_choice': 'auto',
+        }
+        if provider == 'google':
+            _apply_google_options(kwargs, config)
+
+        t0 = time.monotonic()
+        sem.acquire()
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            logger.error(
+                "Tool round failed (%s): %s", label, exc
+            )
+            return collected
+        finally:
+            sem.release()
+            try:
+                from chatter_request_logger import log_request
+                log_request(
+                    '%s:round%d' % (label, round_no + 1),
+                    user_msg, None, model, provider,
+                    int((time.monotonic() - t0) * 1000),
+                    system_prompt=sys_msg,
+                )
+            except Exception:
+                pass
+
+        try:
+            message = response.choices[0].message
+        except (AttributeError, IndexError, TypeError):
+            return collected
+
+        calls = getattr(message, 'tool_calls', None) or []
+        if not calls:
+            # Nothing to look up -- the model answered from
+            # what it already had, which is the common case.
+            break
+
+        messages = messages + [{
+            'role': 'assistant',
+            'content': getattr(message, 'content', None),
+            'tool_calls': [{
+                'id': c.id,
+                'type': 'function',
+                'function': {
+                    'name': c.function.name,
+                    'arguments': c.function.arguments,
+                },
+            } for c in calls],
+        }]
+
+        for call in calls:
+            name = call.function.name
+            args = _tool_call_args(call)
+            if time.monotonic() >= deadline:
+                result = 'lookup skipped: time budget exhausted'
+            else:
+                try:
+                    result = execute(name, args)
+                except Exception as exc:
+                    logger.error(
+                        "Tool %s failed (%s): %s",
+                        name, label, exc,
+                    )
+                    result = 'lookup failed'
+            result = (result or '').strip()
+            if result:
+                collected.append('%s: %s' % (name, result))
+            messages.append({
+                'role': 'tool',
+                'tool_call_id': call.id,
+                'name': name,
+                'content': result or 'no result',
+            })
+
+    return collected

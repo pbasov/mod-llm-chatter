@@ -191,6 +191,14 @@ def cleanup_message(
     """
     result = message
 
+    # Link markers from tool-backed lookups. mod-llm-guide's
+    # tools emit [[npc:ID:Name]] for its own C++ link
+    # converter; chatter has none, so anything that survives
+    # into a message would be typed into chat as raw markup.
+    # Keep the name, drop the scaffolding.
+    result = re.sub(
+        r'\[\[[a-z]+:\d+:([^\]]+)\]\]', r'\1', result)
+
     # Collapse newlines into single space (WoW chat
     # is single-line; multi-line LLM output causes
     # ugly line breaks). Catches real newlines,

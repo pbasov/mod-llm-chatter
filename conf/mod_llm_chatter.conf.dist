@@ -2097,6 +2097,68 @@ LLMChatter.Bridge.RequestTimeout = 60
 #
 LLMChatter.Bridge.MaxRetries = 0
 
+####################################################################################################
+# TOOL CALLING (on-demand game lookups)
+####################################################################################################
+#
+#   LLMChatter.Tools.Enable
+#       Let bots look facts up instead of guessing. When a
+#       player addresses a bot directly, a short grounding
+#       call runs first with lookup tools attached; anything
+#       it returns is injected into the normal prompt as a
+#       <lookup_results> block. Ambient, combat and idle
+#       chatter are untouched and still cost one call.
+#       Requires mod-llm-guide's tools/ tree to be reachable
+#       (see GuidePath) for anything beyond the two native
+#       lookups.
+#       Default: 0 (disabled)
+#
+LLMChatter.Tools.Enable = 0
+
+#
+#   LLMChatter.Tools.GuidePath
+#       Directory containing mod-llm-guide's tools/ modules,
+#       which supply the world-database tool catalogue. If
+#       this is not importable the feature degrades to the
+#       two native lookups (own quest log, own memories)
+#       rather than failing.
+#       Default: /app/guide
+#
+LLMChatter.Tools.GuidePath = /app/guide
+
+#
+#   LLMChatter.Tools.Allowed
+#       Which of mod-llm-guide's tools to expose. Every schema
+#       costs prompt tokens on every responsive call, so this
+#       is a curated subset rather than all 29.
+#
+LLMChatter.Tools.Allowed = get_quest_info,get_available_quests,get_quest_chain,find_quest_giver,get_item_info,find_npc,find_vendor,find_trainer,get_zone_info,get_dungeon_info
+
+#
+#   LLMChatter.Tools.MaxRounds
+#       Maximum tool-calling rounds per grounding call.
+#       Default: 2
+#
+LLMChatter.Tools.MaxRounds = 2
+
+#
+#   LLMChatter.Tools.BudgetSeconds
+#       Wall-clock budget for the grounding call. On overrun
+#       the bot answers without lookups. Keep this well under
+#       five minutes: events stuck in 'processing' that long
+#       are returned to the queue and would be spoken twice.
+#       Default: 45
+#
+LLMChatter.Tools.BudgetSeconds = 45
+
+#
+#   LLMChatter.Tools.MaxTokens
+#       Token budget for each grounding round. Only needs to
+#       fit tool calls, never a spoken message.
+#       Default: 300
+#
+LLMChatter.Tools.MaxTokens = 300
+
 #
 #   LLMChatter.Bridge.InterSystemStaggerMin
 #   LLMChatter.Bridge.InterSystemStaggerMax

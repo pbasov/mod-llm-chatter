@@ -87,6 +87,7 @@ from chatter_prompts import (
     generate_conversation_length_sequence,
     pick_personality_spices,
 )
+from chatter_tools import ground_prompt, ctx_from_bot
 from chatter_group_state import (
     set_group_chat_history_limit,
     assign_bot_traits,
@@ -1799,6 +1800,18 @@ def process_group_player_msg_event(
             stored_tone=stored_tone,
             memories=msg_memories,
             travel_context=travel_context,
+        )
+
+        # The player asked this bot something directly, so
+        # let it look up anything it cannot know from the
+        # conversation before it answers.
+        prompt = ground_prompt(
+            prompt, client, config,
+            ctx_from_bot(
+                bot, player_name, player_guid,
+                get_zone_name(zone_id),
+            ),
+            player_message,
         )
 
         max_tokens = pick_random_max_tokens(config)
