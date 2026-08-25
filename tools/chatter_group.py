@@ -1735,10 +1735,13 @@ def process_group_player_msg_event(
             # conversation path and the single-reply path below
             # see the same facts. Computing it here also means it
             # happens once per player message, not once per path.
+            # player_guid is not resolved until the memory
+            # block further below, so pass the name instead --
+            # recall_memory looks the guid up from it.
             lookup_block = ground(
                 client, config,
                 ctx_from_bot(
-                    bot, player_name, player_guid,
+                    bot, player_name, None,
                     get_zone_name(zone_id),
                 ),
                 player_message,
