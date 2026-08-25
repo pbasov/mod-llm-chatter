@@ -2137,9 +2137,19 @@ LLMChatter.Tools.Allowed = get_quest_info,get_available_quests,get_quest_chain,f
 #
 #   LLMChatter.Tools.MaxRounds
 #       Maximum tool-calling rounds per grounding call.
-#       Default: 2
 #
-LLMChatter.Tools.MaxRounds = 2
+#       Leave this at 1. A round beyond the first exists only
+#       to let the model chain a second lookup off the first
+#       one's results, and it costs a full round trip every
+#       time -- including generating an answer that is then
+#       discarded, since only the tool results are kept.
+#       Measured on Qwen3.8-27B: 0.94s at 1 round vs 5.35s at
+#       2, with identical grounding success. The model can
+#       already emit several tool calls in parallel within one
+#       round, which covers nearly every real question.
+#       Default: 1
+#
+LLMChatter.Tools.MaxRounds = 1
 
 #
 #   LLMChatter.Tools.BudgetSeconds
