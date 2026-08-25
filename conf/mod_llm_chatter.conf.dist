@@ -2128,11 +2128,19 @@ LLMChatter.Tools.GuidePath = /app/guide
 
 #
 #   LLMChatter.Tools.Allowed
-#       Which of mod-llm-guide's tools to expose. Every schema
-#       costs prompt tokens on every responsive call, so this
-#       is a curated subset rather than all 29.
+#       Which of mod-llm-guide's tools to expose. "*" is all of
+#       them; otherwise a comma-separated list.
 #
-LLMChatter.Tools.Allowed = get_quest_info,get_available_quests,get_quest_chain,find_quest_giver,get_item_info,find_npc,find_vendor,find_trainer,get_zone_info,get_dungeon_info
+#       Prefer "*". A curated subset looks like a saving on
+#       prompt tokens, but a missing tool is not a saving -- it
+#       is a hole the model fills from memory, confidently. With
+#       no boss-listing tool available a bot named Blackwing
+#       Lair's FIRST boss as the final boss of the Deadmines and
+#       then defended the answer when challenged. The schemas
+#       ride only on the small grounding prompt, never on the
+#       call that produces speech.
+#
+LLMChatter.Tools.Allowed = *
 
 #
 #   LLMChatter.Tools.MaxRounds

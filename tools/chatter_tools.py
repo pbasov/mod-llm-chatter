@@ -27,13 +27,15 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-# Guide tools that make sense in conversation. Not all 29 --
-# every schema is prompt tokens on every responsive call.
-DEFAULT_ALLOWED = (
-    'get_quest_info,get_available_quests,get_quest_chain,'
-    'find_quest_giver,get_item_info,find_npc,find_vendor,'
-    'find_trainer,get_zone_info,get_dungeon_info'
-)
+# "*" = every tool mod-llm-guide exposes. A curated subset was the
+# original instinct, to save prompt tokens on the grounding call --
+# but a tool that is absent is not a saving, it is a hole the model
+# fills from memory. With no boss-listing tool available it named
+# Blackwing Lair's FIRST boss as the final boss of the Deadmines,
+# and then defended the answer. The schemas ride only on the small
+# Stage-A prompt, never on the speaking call, so breadth is far
+# cheaper than being confidently wrong.
+DEFAULT_ALLOWED = '*'
 
 # Guide's tools emit link markers for its own C++ converter,
 # which chatter does not have. Left in, bots type raw markup
@@ -173,6 +175,32 @@ NATIVE_TOOLS = [
             ),
             'parameters': {
                 'type': 'object', 'properties': {},
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'get_dungeon_bosses',
+            'description': (
+                'List the bosses of a dungeon or raid IN ORDER, so '
+                'the last one returned is the final boss. ALWAYS '
+                'call this before naming any boss of an instance -- '
+                'never answer from memory, you will confuse '
+                'similarly-themed instances.'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'dungeon_name': {
+                        'type': 'string',
+                        'description': (
+                            "Dungeon or raid name, e.g. 'Deadmines', "
+                            "'Shadowfang Keep', 'Blackwing Lair'."
+                        ),
+                    },
+                },
+                'required': ['dungeon_name'],
             },
         },
     },
@@ -327,6 +355,106 @@ def _quest_log(config, ctx, limit=12):
                 pass
 
 
+_dungeon_index = None
+
+
+def _dungeon_map_index():
+    """name -> map_id, built from DUNGEON_FLAVOR.
+
+    map_dbc and dungeonencounter_dbc are both empty stubs on this
+    world DB (0 and 16 rows), so there is no table mapping a
+    dungeon's name to its map. DUNGEON_FLAVOR is keyed by map id
+    with "Name: description" values, which is enough.
+    """
+    global _dungeon_index
+    if _dungeon_index is not None:
+        return _dungeon_index
+    idx = {}
+    try:
+        from chatter_constants import DUNGEON_FLAVOR
+        for map_id, text in DUNGEON_FLAVOR.items():
+            name = str(text).split(':', 1)[0].strip()
+            if not name:
+                continue
+            idx[_norm(name)] = (int(map_id), name)
+            # "The Deadmines" should also answer to "Deadmines"
+            bare = _norm(name)
+            for article in ('the ', 'the'):
+                if bare.startswith(article):
+                    idx.setdefault(bare[len(article):], (int(map_id), name))
+    except Exception:
+        logger.debug("dungeon index unavailable", exc_info=True)
+    _dungeon_index = idx
+    return idx
+
+
+def _norm(text):
+    return ' '.join(str(text or '').lower().split())
+
+
+def _resolve_dungeon(name):
+    """Best-effort dungeon name -> (map_id, canonical name)."""
+    idx = _dungeon_map_index()
+    key = _norm(name)
+    if key in idx:
+        return idx[key]
+    if key.startswith('the '):
+        alt = key[4:]
+        if alt in idx:
+            return idx[alt]
+    # substring, then fuzzy
+    for k, v in idx.items():
+        if key and (key in k or k in key):
+            return v
+    import difflib
+    close = difflib.get_close_matches(key, list(idx), n=1, cutoff=0.7)
+    return idx[close[0]] if close else (None, None)
+
+
+def _dungeon_bosses(config, dungeon_name):
+    """Ordered boss list for an instance.
+
+    Uses instance_encounters, which is the encounter table the core
+    itself credits kills against -- 628 rows here. The obvious
+    alternatives do not work: creature_template.rank = 3 means WORLD
+    boss, so a 5-man like Deadmines has none of them, and
+    dungeonencounter_dbc is a 16-row stub.
+    """
+    from chatter_db import get_db_connection
+    map_id, canonical = _resolve_dungeon(dungeon_name)
+    if not map_id:
+        return 'no dungeon by that name'
+    db = None
+    try:
+        db = get_db_connection(config, database='acore_world')
+        cur = db.cursor(dictionary=True)
+        cur.execute(
+            "SELECT ct.name"
+            " FROM instance_encounters ie"
+            " JOIN creature_template ct ON ct.entry = ie.creditEntry"
+            " WHERE ie.creditEntry IN ("
+            "   SELECT DISTINCT c.id FROM creature c WHERE c.map = %s)"
+            " ORDER BY ie.entry",
+            (int(map_id),),
+        )
+        names = [r['name'] for r in cur.fetchall()]
+        if not names:
+            return '%s: no encounters recorded' % canonical
+        if len(names) == 1:
+            return '%s: only boss is %s' % (canonical, names[0])
+        return '%s bosses in order: %s. The FINAL boss is %s.' % (
+            canonical, ', '.join(names[:-1]), names[-1])
+    except Exception:
+        logger.error("dungeon boss lookup failed", exc_info=True)
+        return 'could not look that up'
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
 def _recall(config, ctx, topic):
     """Search this bot's memories of this player.
 
@@ -412,19 +540,22 @@ def select_tools(config, executor):
     tools = list(NATIVE_TOOLS)
     guide = _load_guide(config) if executor is not None else None
     if guide is not None:
-        allowed = {
-            n.strip() for n in config.get(
-                'LLMChatter.Tools.Allowed', DEFAULT_ALLOWED
-            ).split(',') if n.strip()
-        }
-        subset = [t for t in guide.GAME_TOOLS
-                  if t.get('name') in allowed]
-        missing = allowed - {t.get('name') for t in subset}
-        if missing:
-            logger.warning(
-                "Configured tools not present in guide's "
-                "catalogue: %s", sorted(missing),
-            )
+        raw = str(config.get(
+            'LLMChatter.Tools.Allowed', DEFAULT_ALLOWED
+        )).strip()
+        if raw == '*':
+            subset = list(guide.GAME_TOOLS)
+        else:
+            allowed = {n.strip() for n in raw.split(',')
+                       if n.strip()}
+            subset = [t for t in guide.GAME_TOOLS
+                      if t.get('name') in allowed]
+            missing = allowed - {t.get('name') for t in subset}
+            if missing:
+                logger.warning(
+                    "Configured tools not present in guide's "
+                    "catalogue: %s", sorted(missing),
+                )
         # Guide ships convert_tools_to_openai_format, but it
         # lives in its bridge module which imports the whole
         # world. The mapping is three keys; do it here.
@@ -445,6 +576,9 @@ def make_execute(config, executor, ctx):
     def _execute(name, args):
         if name == 'get_my_quest_log':
             return _quest_log(config, ctx)
+        if name == 'get_dungeon_bosses':
+            return _dungeon_bosses(
+                config, args.get('dungeon_name', ''))
         if name == 'recall_memory':
             return _recall(config, ctx, args.get('topic', ''))
         if executor is None:
@@ -487,8 +621,11 @@ def ground(client, config, ctx, player_message):
             "fetch it. The database is the source of truth "
             "for this server; your own recollection of World "
             "of Warcraft may be wrong or from a different "
-            "expansion. If no lookup is needed, reply with "
-            "the single word NONE." % (
+            "expansion -- bosses and instances especially are "
+            "easy to confuse, so look them up rather than "
+            "trusting yourself. Prefer calling several tools at "
+            "once over guessing. If no lookup is needed, reply "
+            "with the single word NONE." % (
                 who,
                 ctx.get('bot_level') or '?',
                 ctx.get('bot_race') or '',
@@ -517,7 +654,12 @@ def ground(client, config, ctx, player_message):
             "These are authoritative -- prefer them over "
             "anything you think you remember, and weave them "
             "into your reply naturally rather than reciting "
-            "them.\n%s\n</lookup_results>\n"
+            "them.\n%s\n"
+            "If these results do not actually answer what was "
+            "asked, say plainly that you do not know rather "
+            "than filling the gap from memory. Being wrong "
+            "about Azeroth is worse than admitting ignorance."
+            "\n</lookup_results>\n"
             % '\n'.join('  - ' + r for r in results)
         )
     except Exception:
