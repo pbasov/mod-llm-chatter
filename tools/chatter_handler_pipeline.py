@@ -291,6 +291,27 @@ def run_group_handler(
         # 10. Build prompt
         prompt = build_prompt(ctx)
 
+        # 11a. Voice examples. Everything else conditioning this
+        # character's voice is adjectives -- three random traits
+        # and a short tone phrase -- which is the weakest and most
+        # common way to do it. These are the only lines in the
+        # prompt that show the model what the character actually
+        # sounds like, so they go in last, where they carry most
+        # weight.
+        voice = trait_data.get('voice_examples')
+        if voice:
+            prompt += (
+                "\n<voice>\n"
+                "Lines this character has said before. Match this "
+                "voice -- the rhythm, the register, the kind of "
+                "thing they notice. Do not reuse them.\n"
+                + "\n".join(
+                    "  " + ln for ln in str(voice).splitlines()
+                    if ln.strip()
+                )
+                + "\n</voice>\n"
+            )
+
         # 11. Mood injection
         if inject_mood:
             mood_label = get_bot_mood_label(

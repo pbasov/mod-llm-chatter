@@ -794,6 +794,22 @@ def insert_chat_message(
     battleground crowd) MUST pass it explicitly ('raid'/'bg')
     so they are not silenced by GroupChatter.Enable.
     """
+    # Era tripwire. Every delivered line passes through here, so
+    # this is the one place that sees all of them. Log only --
+    # never suppress: a silent bot is worse than a slightly wrong
+    # one, and what this is really for is making the rate
+    # measurable instead of anecdotal.
+    try:
+        from chatter_lore import find_anachronisms
+        bad = find_anachronisms(message)
+        if bad:
+            logger.warning(
+                "Anachronism from %s (%s): %s | %.200s",
+                bot_name, channel, ', '.join(bad), message,
+            )
+    except Exception:
+        pass
+
     if owner_subsystem is None:
         if channel in ('party', 'raid'):
             # Group is the dominant party/raid producer.

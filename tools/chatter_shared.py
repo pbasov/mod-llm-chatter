@@ -1420,7 +1420,13 @@ def append_json_instruction(
             "commas, no code fences, no markdown.\n"
             "CRITICAL: Follow the Length instruction "
             "in the prompt exactly — never exceed the "
-            "stated character limit."
+            "stated character limit.\n"
+            "Speak about what has already happened or "
+            "what is true right now. Do not announce "
+            "what you are about to do -- something else "
+            "decides your actions, and a promise you "
+            "cannot keep reads worse than saying "
+            "nothing."
             f"{lang_rule}"
         )
         return PromptParts(prompt, block)
@@ -1481,7 +1487,12 @@ def append_json_instruction(
         "commas, no code fences, no markdown.\n"
         "CRITICAL: Follow the Length instruction "
         "in the prompt exactly — never exceed the "
-        "stated character limit."
+        "stated character limit.\n"
+        "Speak about what has already happened or what "
+        "is true right now. Do not announce what you "
+        "are about to do -- something else decides your "
+        "actions, and a promise you cannot keep reads "
+        "worse than saying nothing."
         f"{lang_rule}"
     )
     return PromptParts(prompt, block)

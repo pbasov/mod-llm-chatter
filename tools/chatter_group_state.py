@@ -8,6 +8,7 @@ This module owns:
 
 from chatter_llm import (
     make_openai_client, make_anthropic_client,
+    get_llm_client,
 )
 import logging
 import random
@@ -497,6 +498,143 @@ def _generate_bot_tone(
         return fallback
 
 
+def _generate_bot_voice_examples(
+    db, config, bot_guid, group_id,
+    bot_name, bot_class, bot_race, traits, tone,
+):
+    """Generate a few example lines this bot would say.
+
+    Adjective lists are the weakest way to condition a voice and
+    the most common; a couple of concrete lines control it far
+    better. Everything else about this character's persona is
+    adjectives -- three random ones plus a 5-8 word tone phrase --
+    so this is the only thing in the prompt that shows the model
+    what the character actually sounds like.
+
+    Written once and reused for the life of the character, so the
+    cost of the extra call amortises to nothing.
+    """
+    if not int(config.get(
+        'LLMChatter.VoiceExamples.Enable', 1
+    )):
+        return None
+
+    def _sync_group_rows(cursor, value):
+        if group_id:
+            cursor.execute(
+                "UPDATE llm_group_bot_traits"
+                " SET voice_examples = %s"
+                " WHERE group_id = %s AND bot_guid = %s",
+                (value, group_id, bot_guid),
+            )
+        else:
+            cursor.execute(
+                "UPDATE llm_group_bot_traits"
+                " SET voice_examples = %s"
+                " WHERE bot_guid = %s",
+                (value, bot_guid),
+            )
+
+    # Reuse a stored set if there is one.
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT voice_examples FROM llm_bot_identities"
+            " WHERE bot_guid = %s",
+            (bot_guid,),
+        )
+        row = cursor.fetchone()
+        if row and row.get('voice_examples'):
+            stored = row['voice_examples']
+            cursor = db.cursor()
+            _sync_group_rows(cursor, stored)
+            db.commit()
+            return stored
+    except Exception:
+        pass
+
+    trait_str = ', '.join(t for t in traits if t)
+    prompt = (
+        "You are writing sample dialogue for a character in "
+        "World of Warcraft (Wrath of the Lich King era).\n\n"
+        f"Character: {bot_name}, a {bot_race} {bot_class}.\n"
+        f"Personality: {trait_str}\n"
+        f"Speaking tone: {tone or trait_str}\n\n"
+        "Write exactly 3 short lines this character might say "
+        "while adventuring with a companion. One line per row, "
+        "no numbering, no quotes, no stage directions.\n\n"
+        "Rules:\n"
+        "- Each line under 15 words\n"
+        "- They must sound like the SAME person, and like nobody "
+        "else\n"
+        "- Ordinary moments, not speeches: reacting to a fight, a "
+        "find, or a companion\n"
+        "- Stay inside Warcraft as it exists in Wrath of the Lich "
+        "King; invent no places or events\n"
+        "- Do not reference the character's own race or class by "
+        "name"
+    )
+
+    from chatter_shared import get_language_rule
+    lang_rule = get_language_rule()
+    if lang_rule:
+        prompt += lang_rule
+
+    try:
+        client = get_llm_client(config)
+        response = call_llm(
+            client, prompt, config,
+            max_tokens_override=150,
+            context=f"voice:{bot_name}",
+            label='bot_voice_examples',
+        )
+        if not response:
+            return None
+        lines = [
+            ln.strip().strip('"').lstrip('-').strip()
+            for ln in response.strip().splitlines()
+        ]
+        lines = [ln for ln in lines if ln][:3]
+        if not lines:
+            return None
+
+        from chatter_lore import audit_text
+        joined = '\n'.join(lines)
+        if audit_text(joined, race=bot_race,
+                      label='voice:%s' % bot_name):
+            # Cheap to skip: the adjective persona still applies.
+            return None
+        joined = joined[:600]
+
+        cursor = db.cursor()
+        _sync_group_rows(cursor, joined)
+        target_version = int(config.get(
+            'LLMChatter.Memory.IdentityVersion', 1
+        ))
+        cursor.execute(
+            "INSERT INTO llm_bot_identities"
+            " (bot_guid, bot_name, trait1, trait2, trait3,"
+            "  voice_examples, identity_version)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)"
+            " ON DUPLICATE KEY UPDATE"
+            "  voice_examples = VALUES(voice_examples)",
+            (bot_guid, bot_name, traits[0], traits[1],
+             traits[2], joined, target_version),
+        )
+        db.commit()
+        logger.debug(
+            "Voice examples for %s: %s",
+            bot_name, joined.replace('\n', ' / ')[:100],
+        )
+        return joined
+    except Exception:
+        logger.debug(
+            "Voice example generation failed for %s",
+            bot_name, exc_info=True,
+        )
+        return None
+
+
 def _generate_bot_backstory(
     db, config, bot_guid, group_id,
     bot_name, bot_class, bot_race, traits, tone,
@@ -673,20 +811,53 @@ def _generate_bot_backstory(
         pass
 
     try:
-        response = call_llm(
-            client, prompt, config,
-            max_tokens_override=200,
-            context=f"backstory:{bot_name}",
-            label='bot_backstory',
-        )
-        if not response:
-            raise ValueError("empty response")
+        # A backstory is written once and then reused for the life
+        # of the character, so an error here is permanent -- which
+        # makes it the one piece of generated text worth checking
+        # and regenerating. Cost amortises to nothing.
+        from chatter_lore import audit_text
+        backstory = None
+        attempts = 2
+        for attempt in range(attempts):
+            attempt_prompt = prompt
+            if attempt:
+                attempt_prompt = prompt + (
+                    "\n\nYour previous attempt was rejected: %s\n"
+                    "This realm is Wrath of the Lich King (3.3.5a). "
+                    "Nothing from a later expansion exists yet, and "
+                    "the character must come from their OWN people's "
+                    "lands. Write it again."
+                    % '; '.join(problems)
+                )
+            response = call_llm(
+                client, attempt_prompt, config,
+                max_tokens_override=200,
+                context=f"backstory:{bot_name}",
+                label='bot_backstory',
+            )
+            if not response:
+                raise ValueError("empty response")
+            candidate = response.strip().strip('"').strip()
+            if not candidate:
+                raise ValueError("blank backstory")
+            candidate = candidate[:1000]
 
-        backstory = response.strip().strip('"').strip()
-        if not backstory:
-            raise ValueError("blank backstory")
-        # Cap at 1000 chars
-        backstory = backstory[:1000]
+            problems = audit_text(
+                candidate, race=bot_race,
+                label='backstory:%s' % bot_name,
+            )
+            if not problems:
+                backstory = candidate
+                break
+            logger.warning(
+                "Backstory for %s rejected (attempt %d/%d): %s",
+                bot_name, attempt + 1, attempts,
+                '; '.join(problems),
+            )
+            backstory = candidate  # keep the last as fallback
+
+        if backstory is None:
+            raise ValueError("no backstory produced")
 
         # Store in DB — upsert identity so backstory
         # persists even if no identity row existed
@@ -1164,10 +1335,24 @@ def assign_bot_traits(
         except Exception:
             pass
 
+    # Example lines. Generated after tone so it has something to
+    # imitate, and once per character forever.
+    voice_examples = None
+    if config and bot_class and bot_race:
+        try:
+            voice_examples = _generate_bot_voice_examples(
+                db, config, bot_guid, group_id,
+                bot_name, bot_class, bot_race,
+                traits, tone,
+            )
+        except Exception:
+            pass
+
     return {
         'traits': traits,
         'tone': tone,
         'backstory': backstory,
+        'voice_examples': voice_examples,
     }
 
 
@@ -1179,6 +1364,7 @@ def get_bot_traits(
     cursor.execute("""
         SELECT trait1, trait2, trait3,
             bot_name, role, tone, backstory,
+            voice_examples,
             zone, area, map,
             travel_mode, travel_context,
             is_mounted, is_flying,
@@ -1218,6 +1404,7 @@ def get_bot_traits(
             'role': row.get('role'),
             'tone': row.get('tone'),
             'backstory': row.get('backstory'),
+            'voice_examples': row.get('voice_examples'),
             'zone': zone,
             'area': area,
             'map': map_id,

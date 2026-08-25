@@ -325,6 +325,7 @@ def build_bot_greeting_prompt(
                 f"Use them as passive context only "
                 f"— do not recite them.\n"
                 f"{mem_lines}\n"
+                f"If none of these memories actually relate to what is happening now, ignore them entirely rather than forcing one in. A companion who misremembers is worse than one who simply does not bring it up.\n"
                 f"</past_memories>\n"
             )
         if recall_memory:
@@ -2233,6 +2234,7 @@ def build_player_response_prompt(
                 f"creature, or the moment "
                 f"by name. Keep it natural "
                 f"(not a full retelling).\n"
+                f"If none of these memories actually relate to what is happening now, ignore them entirely rather than forcing one in. A companion who misremembers is worse than one who simply does not bring it up.\n"
                 f"</past_memories>"
             )
             if solo_bot:
@@ -4387,6 +4389,7 @@ def build_bot_question_prompt(
                 f"Mention the place, creature, or "
                 f"moment by name so {player_name} "
                 f"would recognise it.\n"
+                f"If none of these memories actually relate to what is happening now, ignore them entirely rather than forcing one in. A companion who misremembers is worse than one who simply does not bring it up.\n"
                 f"</past_memories>\n\n"
                 f"You are grouped with "
                 f"{player_name}, a level "

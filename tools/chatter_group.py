@@ -2793,6 +2793,7 @@ def build_idle_chatter_prompt(
                 f"{p_label} would recognise the "
                 f"callback. Keep it natural "
                 f"(not a full retelling).\n"
+                f"If none of these memories actually relate to what is happening now, ignore them entirely rather than forcing one in. A companion who misremembers is worse than one who simply does not bring it up.\n"
                 f"</past_memories>\n\n"
             )
             if solo_bot and player_name:
@@ -3200,6 +3201,7 @@ def build_idle_conversation_prompt(
                         f"creature, or moment by "
                         f"name so {p_label} "
                         f"recognises the callback."
+                        f"If none of these memories actually relate to what is happening now, ignore them entirely rather than forcing one in. A companion who misremembers is worse than one who simply does not bring it up.\n"
                         f"\n</past_memories>"
                     )
                 else:
