@@ -173,6 +173,14 @@ def _rate_ok(config):
         return True
 
 
+def _str_metadata(values):
+    """Hindsight metadata values must be strings."""
+    return {
+        k: str(v) for k, v in values.items()
+        if v is not None and v != ''
+    }
+
+
 def _tags(ctx, memory_type=None, zone=None):
     tags = []
     if ctx.get('bot_name'):
@@ -213,14 +221,31 @@ def retain(config, ctx, items):
             break
         item = {
             'content': text,
+            # Entries are written in the first person, and a
+            # shared bank has no idea who "I" is -- without
+            # this it resolves to the bank's own identity and
+            # every companion's memory is attributed to
+            # "azerothcore", collapsing forty characters into
+            # one entity.
+            'context': (
+                "First-person journal entry written by %s, "
+                "a companion adventuring with %s. \"I\" and "
+                "\"my\" refer to %s."
+                % (ctx['bot_name'],
+                   ctx.get('player_name') or 'a player',
+                   ctx['bot_name'])
+            ),
             'tags': _tags(
                 ctx, it.get('memory_type'), it.get('zone')),
-            'metadata': {
+            # Hindsight's metadata map is string-valued; an int
+            # guid is rejected with a 422 and the whole batch
+            # is lost.
+            'metadata': _str_metadata({
                 'bot_guid': ctx.get('bot_guid'),
                 'player_guid': ctx.get('player_guid'),
                 'memory_type': it.get('memory_type'),
                 'zone': it.get('zone'),
-            },
+            }),
         }
         if it.get('id'):
             # Keyed to the MySQL row so a replay is an update,
