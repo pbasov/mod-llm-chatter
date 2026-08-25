@@ -2421,6 +2421,7 @@ def execute_player_msg_conversation(
     item_context="", link_context="",
     items_info=None,
     zone_id=0, area_id=0, map_id=0,
+    lookup_context="",
 ):
     """Run a multi-bot conversation responding to
     a player's party chat message.
@@ -2558,6 +2559,13 @@ def execute_player_msg_conversation(
         area_id=area_id,
         map_id=map_id,
     )
+    # Grounding is computed once by the caller and shared by both
+    # reply paths. This branch used to miss it entirely, which is
+    # why a party that fell into multi-bot conversation would
+    # confabulate -- "the manual says Deadmines is in Silvermoon"
+    # -- while a single reply looked it up correctly.
+    if lookup_context:
+        prompt = prompt + lookup_context
 
     # Token budget: max_tokens * (1 + num_bots),
     # capped at 1000

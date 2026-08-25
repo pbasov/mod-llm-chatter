@@ -87,7 +87,7 @@ from chatter_prompts import (
     generate_conversation_length_sequence,
     pick_personality_spices,
 )
-from chatter_tools import ground_prompt, ctx_from_bot
+from chatter_tools import ground, ground_prompt, ctx_from_bot
 from chatter_group_state import (
     set_group_chat_history_limit,
     assign_bot_traits,
@@ -1529,6 +1529,11 @@ def process_group_player_msg_event(
         _mark_event(db, event_id, 'skipped')
         return False
 
+    # Grounded lookups for this message. Computed at most once and
+    # shared by the multi-bot conversation path and the single-reply
+    # path; None means "not grounded yet".
+    lookup_block = None
+
     # Parse and resolve WoW links in message
     # Keep raw message for detect_item_links
     raw_player_message = player_message
@@ -1726,6 +1731,18 @@ def process_group_player_msg_event(
                 'travel_context': travel_context,
                 'travel_state': travel_state,
             }
+            # Ground BEFORE the branch, so both the multi-bot
+            # conversation path and the single-reply path below
+            # see the same facts. Computing it here also means it
+            # happens once per player message, not once per path.
+            lookup_block = ground(
+                client, config,
+                ctx_from_bot(
+                    bot, player_name, player_guid,
+                    get_zone_name(zone_id),
+                ),
+                player_message,
+            )
             try:
                 conv_ok = (
                     execute_player_msg_conversation(
@@ -1741,6 +1758,7 @@ def process_group_player_msg_event(
                         zone_id=zone_id,
                         area_id=area_id,
                         map_id=map_id,
+                        lookup_context=lookup_block,
                     )
                 )
                 if conv_ok:
@@ -1838,17 +1856,19 @@ def process_group_player_msg_event(
             travel_context=travel_context,
         )
 
-        # The player asked this bot something directly, so
-        # let it look up anything it cannot know from the
-        # conversation before it answers.
-        prompt = ground_prompt(
-            prompt, client, config,
-            ctx_from_bot(
-                bot, player_name, player_guid,
-                get_zone_name(zone_id),
-            ),
-            player_message,
-        )
+        # Reuse the block grounded above; only ground here if the
+        # conversation branch was never reached.
+        if lookup_block is None:
+            lookup_block = ground(
+                client, config,
+                ctx_from_bot(
+                    bot, player_name, player_guid,
+                    get_zone_name(zone_id),
+                ),
+                player_message,
+            )
+        if lookup_block:
+            prompt = prompt + lookup_block
 
         max_tokens = pick_random_max_tokens(config)
         if msg_memories:

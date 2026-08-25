@@ -2097,6 +2097,20 @@ LLMChatter.Bridge.RequestTimeout = 60
 #
 LLMChatter.Bridge.MaxRetries = 0
 
+#
+#   LLMChatter.OrphanGuardGraceSeconds
+#       Group events are dropped when the group has no traits
+#       rows, on the assumption the group is gone. But a group
+#       that has only just formed has no traits rows either,
+#       and the join handler writes them a moment later -- so
+#       anything said in that window was silently discarded.
+#       Events younger than this go back to the queue for a
+#       retry instead of being killed. They still expire on
+#       their own deadline if the group really has gone.
+#       Default: 20
+#
+LLMChatter.OrphanGuardGraceSeconds = 20
+
 ####################################################################################################
 # TOOL CALLING (on-demand game lookups)
 ####################################################################################################

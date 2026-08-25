@@ -819,11 +819,32 @@ def process_single_event(event, client, config):
                         (gid,)
                     )
                     if not cursor.fetchone():
+                        # No traits rows can mean two opposite
+                        # things, and this used to treat them the
+                        # same: the group is gone, OR it has just
+                        # formed and the join handler has not
+                        # written them yet. The second case is
+                        # common -- summon bots, type immediately
+                        # -- and killing the event there means the
+                        # first thing you ever say is silently
+                        # dropped, with no error anywhere.
+                        #
+                        # Young events go back to pending for the
+                        # next poll instead. If the group really is
+                        # gone they simply expire on their own
+                        # deadline, so this is bounded either way.
+                        grace = int(config.get(
+                            'LLMChatter.OrphanGuardGraceSeconds',
+                            20,
+                        ))
                         cursor.execute(
                             "UPDATE llm_chatter_events"
-                            " SET status = 'expired'"
+                            " SET status = IF("
+                            "   created_at > NOW()"
+                            "     - INTERVAL %s SECOND,"
+                            "   'pending', 'expired')"
                             " WHERE id = %s",
-                            (event_id,)
+                            (grace, event_id)
                         )
                         db.commit()
                         return False
